@@ -1,0 +1,20 @@
+# ignore all .csv files
+*.csv
+
+# ignore all .json files
+*.json
+
+# ignore all .log files
+*.log
+
+# ignore all media files
+*.mp4
+*.avi
+*.mkv
+*.mp4
+
+# ignore all temporary files
+*.tmp
+
+# ignore all file in the run_out directory
+run_out/
