@@ -9,10 +9,15 @@
   },
   "script": [
     { "label": "Baseline Rest", "duration_s": 10, "prompt": "Relax and look at the dot" },
-    { "label": "Blink",         "duration_s": 8,  "prompt": "Blink once every 2s" },
-    { "label": "Left Hand",     "duration_s": 10, "prompt": "Clench and release (left hand)" },
-    { "label": "Right Hand",    "duration_s": 10, "prompt": "Clench and release (right hand)" },
-    { "label": "Deep Breath",   "duration_s": 8,  "prompt": "Slow inhale and exhale" }
+    { "label": "Fist",       "duration_s": 7,  "prompt": "" },
+    { "label": "Baseline Rest", "duration_s": 10, "prompt": "Relax and look at the dot" },
+    { "label": "Finger Spread",     "duration_s": 7, "prompt": "Clench and release (left hand)" },
+    { "label": "Baseline Rest", "duration_s": 10, "prompt": "Relax and look at the dot" },
+    { "label": "Fist",    "duration_s": 10, "prompt": "Clench and release (right hand)" },
+    { "label": "Baseline Rest", "duration_s": 10, "prompt": "Relax and look at the dot" },
+    { "label": "Finger Spread",   "duration_s": 8,  "prompt": "Slow inhale and exhale" },
+    { "label": "Baseline Rest", "duration_s": 10, "prompt": "Relax and look at the dot" },
+    { "label": "Finger Touch", "duration_s": 10, "prompt": "Relax and look at the dot" }
   ],
   "lsl": {
     "eeg_resolve": { "prop": "name", "value": "obci_eeg1", "timeout": 10.0 },

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import cv2
 import csv
 import json
@@ -6,8 +7,9 @@ import time
 import queue
 import pathlib
 import threading
+import numpy as np
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 from pylsl import StreamInfo, StreamOutlet, local_clock
 from eegTool import EEGRecorder
@@ -94,7 +96,6 @@ class Teleprompter:
             active_elapsed = 0.0
 
             while not self._stop.is_set() and remaining > 0:
-                # pause holds the timer (no countdown during pause)
                 if self._paused.is_set():
                     time.sleep(0.05)
                     last_tick = time.perf_counter()  # prevent time jump after resume
@@ -151,6 +152,41 @@ def draw_overlay(frame, state: Optional[Dict[str, Any]], status_text: str):
     return frame
 
 
+def _open_camera_with_fallback(index: int) -> Tuple[Optional[cv2.VideoCapture], bool]:
+    """
+    Try to open a real camera using AVFoundation (macOS) then ANY.
+    Returns (cap or None, used_real_camera: bool).
+    """
+    backend_candidates = []
+    # Prefer AVFoundation if available (macOS), then ANY
+    if hasattr(cv2, "CAP_AVFOUNDATION"):
+        backend_candidates.append(cv2.CAP_AVFOUNDATION)
+    backend_candidates.append(cv2.CAP_ANY)
+
+    cap = None
+    # Try requested index
+    for be in backend_candidates:
+        tmp = cv2.VideoCapture(index, be)
+        if tmp.isOpened():
+            cap = tmp
+            break
+        tmp.release()
+
+    # Try default index 0 if requested one fails
+    if cap is None:
+        print(f"[WARN] Could not open camera at index {index}. Trying default camera (index 0).")
+        for be in backend_candidates:
+            tmp = cv2.VideoCapture(0, be)
+            if tmp.isOpened():
+                cap = tmp
+                break
+            tmp.release()
+
+    if cap is not None and cap.isOpened():
+        return cap, True
+    return None, False
+
+
 def run_streaming(cfg: dict):
     """Main runner: LSL outputs, events, teleprompter, EEG inlet, video+hotkeys."""
     outdir = pathlib.Path(cfg["output_dir"] + f"/{datetime.now().strftime('%Y%m%d_%H%M%S')}")
@@ -175,7 +211,7 @@ def run_streaming(cfg: dict):
     # Events + Teleprompter
     events_csv = str(outdir / "events.csv")
     evt = EventWriter(events_csv); evt.start()
-    tele = Teleprompter(cfg["script"], evt)   # <-- remove .start() here
+    tele = Teleprompter(cfg["script"], evt)   # tele.start() happens on 'R' key
     with open(outdir / "script_used.json", "w", encoding="utf-8") as f:
         json.dump(cfg["script"], f, ensure_ascii=False, indent=2)
 
@@ -183,32 +219,45 @@ def run_streaming(cfg: dict):
     eeg_csv = str(outdir / "eeg_lsl.csv")
     eeg_rec = EEGRecorder(cfg, eeg_csv); eeg_rec.start()
 
-    # Camera / window
+    # Camera / window settings
     cam = cfg["camera"]
     win_title = cfg.get("window_title", "Recording + Teleprompter")
     vid_path = str(outdir / "video.mp4")
     vid_ts_csv = str(outdir / "video_ts.csv")
 
-    cap = cv2.VideoCapture(cam["index"], cv2.CAP_DSHOW)
-    if not cap.isOpened():
-        raise RuntimeError("Failed to open camera.")
+    cap, real_cam = _open_camera_with_fallback(cam["index"])
+    use_dummy = not real_cam
+    if use_dummy:
+        print("[WARN] No physical camera available. Using dummy video frames so the stream continues.")
 
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam["width"])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam["height"])
-    cap.set(cv2.CAP_PROP_FPS, cam["fps"])
+    # Establish size/fps
+    if not use_dummy and cap:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam["width"])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam["height"])
+        cap.set(cv2.CAP_PROP_FPS, cam["fps"])
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or cam["width"]
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or cam["height"]
-    fps = cap.get(cv2.CAP_PROP_FPS) or cam["fps"]
-
-    if cam.get("fullscreen", False):
-        cv2.namedWindow(win_title, cv2.WINDOW_NORMAL)
-        cv2.setWindowProperty(win_title, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or cam["width"]
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or cam["height"]
+        fps = int(cap.get(cv2.CAP_PROP_FPS)) or cam["fps"]
     else:
-        cv2.namedWindow(win_title, cv2.WINDOW_NORMAL)
+        width, height, fps = cam["width"], cam["height"], cam["fps"]
 
+    # Window?
+    show_window = bool(cam.get("show_window", True))
+    if show_window:
+        if cam.get("fullscreen", False):
+            cv2.namedWindow(win_title, cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty(win_title, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        else:
+            cv2.namedWindow(win_title, cv2.WINDOW_NORMAL)
+
+    # Video writer?
+    write_video = bool(cam.get("write_video", True))
+    enable_writer = write_video and (fps and width > 0 and height > 0)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    vw = cv2.VideoWriter(vid_path, fourcc, fps, (width, height))
+    vw = cv2.VideoWriter(vid_path, fourcc, fps, (width, height)) if enable_writer else None
+
+    # Video timestamp CSV
     tsf = open(vid_ts_csv, "w", newline="", encoding="utf-8")
     tsw = csv.writer(tsf); tsw.writerow(["frame_idx", "video_lsl_ts", "recording_state"])
 
@@ -217,7 +266,7 @@ def run_streaming(cfg: dict):
     key_start = ord(hk["record_start"])
     key_pause = ord(hk["pause_resume"])
     key_quit  = ord(hk["quit"])
-    key_marker = ord(hk["marker"])  # space: ' '
+    key_marker = ord(hk["marker"])  # e.g., space: ' '
 
     recording = False
     paused = False
@@ -225,26 +274,45 @@ def run_streaming(cfg: dict):
 
     print(f"[INFO] Hotkeys: Start='{hk['record_start']}', Pause/Resume='{hk['pause_resume']}', "
           f"Marker='SPACE', Quit='{hk['quit']}'")
+    if not show_window:
+        print("[INFO] show_window=False -> keyboard hotkeys disabled (OpenCV needs a window for key capture).")
 
     try:
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+            # Acquire frame: real camera or dummy
+            if not use_dummy and cap:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    print("[WARN] Camera stopped delivering frames. Switching to dummy frames.")
+                    use_dummy = True
+                    frame = None  # fall through to dummy creation
+
+            if use_dummy:
+                frame = np.zeros((height, width, 3), dtype=np.uint8)
+
+            # If we still don't have a frame (shouldn't happen), continue without UI/video
+            if frame is None:
+                if show_window:
+                    print("[WARN] No video frames available; continuing without UI/video.")
+                    cv2.destroyAllWindows()
+                    show_window = False
+                time.sleep(0.01)
+                continue
 
             status_text = "READY"
             if recording:
                 status_text = "PAUSED" if paused else "RECORDING"
 
             frame_overlay = draw_overlay(frame, tele.state["current"], status_text)
-            cv2.imshow(win_title, frame_overlay)
+            if show_window:
+                cv2.imshow(win_title, frame_overlay)
 
-            k = cv2.waitKey(1) & 0xFF
+            k = (cv2.waitKey(1) & 0xFF) if show_window else 255  # 255 => no key
             if k == key_start:  # 'R'
                 if not recording:
                     recording = True
                     paused = False
-                    tele.start()  # <-- start teleprompter when recording starts
+                    tele.start()  # start teleprompter when recording starts
                     evt.push("video_start", "video", {"width": width, "height": height, "fps": fps})
                     lsl_mark("video_start", "video")
                     print("[R] Recording started.")
@@ -253,18 +321,20 @@ def run_streaming(cfg: dict):
                 if recording:
                     paused = not paused
                     if paused:
-                        tele.pause()    # <-- pause teleprompter countdown
+                        tele.pause()
                     else:
-                        tele.resume()   # <-- resume teleprompter countdown
+                        tele.resume()
                     state = "paused" if paused else "resumed"
                     evt.push(f"video_{state}", "video", {})
                     lsl_mark(f"video_{state}", "video")
                     print(f"[P] Recording {state}.")
+
             elif k == key_marker:
                 cur = tele.state["current"]
                 label = cur["label"] if cur else "none"
                 evt.push("marker", label, {"key": "space"})
                 lsl_mark("marker", label)
+
             elif k == key_quit:
                 if recording:
                     evt.push("video_end", "video", {"frames": frame_idx})
@@ -274,12 +344,20 @@ def run_streaming(cfg: dict):
             if recording and not paused:
                 ts_lsl = local_clock()
                 video_out.push_sample([ts_lsl], timestamp=ts_lsl)
-                vw.write(frame_overlay)
+                if vw is not None:
+                    vw.write(frame_overlay)
                 tsw.writerow([frame_idx, f"{ts_lsl:.9f}", status_text])
                 frame_idx += 1
+
     finally:
-        cap.release(); vw.release(); tsf.close()
-        cv2.destroyWindow(win_title)
+        # Cleanup
+        if cap is not None and cap.isOpened():
+            cap.release()
+        if vw is not None:
+            vw.release()
+        tsf.close()
+        if show_window:
+            cv2.destroyAllWindows()
 
         tele.stop()
         eeg_rec.stop()
