@@ -6,6 +6,7 @@ import time
 import queue
 import pathlib
 import threading
+from datetime import datetime
 from typing import Dict, Any, Optional
 
 from pylsl import StreamInfo, StreamOutlet, local_clock
@@ -152,7 +153,7 @@ def draw_overlay(frame, state: Optional[Dict[str, Any]], status_text: str):
 
 def run_streaming(cfg: dict):
     """Main runner: LSL outputs, events, teleprompter, EEG inlet, video+hotkeys."""
-    outdir = pathlib.Path(cfg["output_dir"])
+    outdir = pathlib.Path(cfg["output_dir"] + f"/{datetime.now().strftime('%Y%m%d_%H%M%S')}")
     outdir.mkdir(exist_ok=True, parents=True)
 
     # LSL outputs: Markers / VideoTime

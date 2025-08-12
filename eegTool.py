@@ -2,6 +2,8 @@
 import csv
 import time
 import threading
+
+
 from typing import Optional
 
 from pylsl import resolve_streams, StreamInlet
@@ -11,6 +13,7 @@ class EEGRecorder:
     Robust LSL subscriber with retry + verbose logging.
     """
     def __init__(self, config: dict, out_csv_path: str):
+
         self.config = config
         self.out_csv_path = out_csv_path
         self._stop = threading.Event()
