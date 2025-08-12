@@ -1,0 +1,30 @@
+{
+  "output_dir": "./run_out",
+  "camera": {
+    "index": 0,
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "fullscreen": false
+  },
+  "script": [
+    { "label": "Baseline Rest", "duration_s": 10, "prompt": "Relax and look at the dot" },
+    { "label": "Blink",         "duration_s": 8,  "prompt": "Blink once every 2s" },
+    { "label": "Left Hand",     "duration_s": 10, "prompt": "Clench and release (left hand)" },
+    { "label": "Right Hand",    "duration_s": 10, "prompt": "Clench and release (right hand)" },
+    { "label": "Deep Breath",   "duration_s": 8,  "prompt": "Slow inhale and exhale" }
+  ],
+  "lsl": {
+    "eeg_resolve": { "prop": "name", "value": "obci_eeg1", "timeout": 10.0 },
+    "marker_stream_name": "ExpMarkers",
+    "video_stream_name": "VideoTime"
+  },
+  "hotkeys": {
+    "record_start": "r",
+    "pause_resume": "p",
+    "quit": "q",
+    "marker": " "
+  },
+  "window_title": "Recording + Teleprompter"
+}
+
